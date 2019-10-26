@@ -32,4 +32,8 @@ target 'HackGT6' do
 
   use_unimodules!
 
+  pod 'RNSpotify', :path => '../node_modules/rn-spotify-sdk'
+
+  pod 'RNEventEmitter', :path => '../node_modules/react-native-events'
+
 end
