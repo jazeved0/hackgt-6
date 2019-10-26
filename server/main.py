@@ -1,7 +1,7 @@
 from flask import Flask, flash, redirect, render_template, request, session, abort
 import sys
-import spotipy
-import spotipy.util as util
+import os
+import spotify.sync as spotify
 import random
 import requests
 from collections import namedtuple
@@ -9,20 +9,20 @@ from typing import Dict, Tuple, Any
 from math import ceil
 
 app = Flask(__name__)
+spotify_client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
 
 """
-Maps user id to their desired mood and their queue. index is the index of the next song to play.
+Maps user id to their desired mood and their queue. playlist is a list of song IDs. index is the index of the next song to play.
 Example:
 {
-    '3498978328': {
-        'mood': 'upbeat',
-        'playlist': [3, 24, 5],
+    '3sdf498978328': {
+        'mood': (0.25, 0.7, 0.3),
+        'playlist': ['fjiw35', 'fijoi424', '2234f5'],
         'index': 2,
     },
-    …
 }
 """
-data: Dict[str, Dict[str, Any]] = {}
+user_data: Dict[str, Dict[str, Any]] = {}
 
 """
 https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/
@@ -32,55 +32,61 @@ https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-f
 - loudness
 - tempo
 """
-SongFeatures: Tuple[float, float, float, float, float] = namedtuple('SongFeatures', 'valence danceability energy loudness tempo')
-# Maps a song id to its song features
-song_features_cache: Dict[str, SongFeatures] = {}
+Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
-# TODO
-SongMeta: Tuple = namedtuple('SongMeta', 'id name images ')
+# Maps a song id to some of its song features
+song_id_to_mood: Dict[str, Mood] = {}
 
-# TODO: wait a sec I should probably just use Spotipy
+str_to_mood: Dict[str, Mood] = {
+    'upbeat': (1, 1, 0),
+    'slow dance': (1, 0, 1),
+    'hide the tears': (0, 1, 1),
+    'sad bops': (0, 0, 1),
+    'happy chill': (1, 1, 0),
+    'mellow': (1, 0, 0),
+    'adele': (0, 1, 0),
+    'depressed': (0, 0, 0)
+}
+
+Metadata: Tuple = namedtuple('Metadata', 'artist_name ')
+# Maps song ID to its metadata.
+song_metadata: Dict[str, Metadata] = {}
+
 def _fetch_saved_tracks(auth: str) -> List[SongMeta]:
     """
-    Return saved tracks for the given user. If the track is not available in the user's region, it is excluded from the output.
+    Return all saved tracks for the given user. If the track is not available in the user's region, it is (theoretically) excluded from the output.
     https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
 
     :param auth: Authorization ID for the given user.
     """
-    try:
-        res: Dict = requests.get(
-            f'https://api.spotify.com/v1/me/tracks',
-            params={'limit': 50},
-            headers={'Authorization': auth}
-        )
-        res.raise_for_status()
-        song_items: List[Dict] = res['items']
-        total: int = res['total'] # number of tracks in saved tracks
-        if total > 50:
-            for offset in range(50, total, 50):
-                res: Dict = requests.get(
-                    f'https://api.spotify.com/v1/me/tracks',
-                    params={'limit': 50, 'offset': offset},
-                    headers={'Authorization': auth}
-                )
-                res.raise_for_status()
-                song_items += res['items']
-        return song_items
-    except Exception as err:
-        print(f'Error: {err}')
+    res: Dict = spotify_client.saved_tracks(limit=50)
+    song_items: List[Dict] = res['items']
+    total: int = res['total'] # number of tracks in saved tracks
+    if total > 50:
+        for offset in range(50, total, 50):
+            res: Dict = spotify_client.saved_tracks(limit=50, offset=offset)
+            res.raise_for_status()
+            song_items += res['items']
+    return song_items
 
 def _get_queue(auth: str) -> List[str]:
     """
     Return songs that will be played up next for the current user.
     """
-    index = data[auth]['index']
-    return data[auth]['playlist'][index:]
+    index = user_data[auth]['index']
+    return user_data[auth]['playlist'][index:]
 
-def _get_song_features(song_id: str, auth: str) -> SongFeatures:
+def _get_song_features(song_id: str, auth: str) -> Mood:
     """
-    Return the song features for the given song ID, as a named tuple SongFeatures. This gets it from the cache if available, or else gets it from Spotify, and then adds it to song_features_cache.
+    Return the song features for the given song ID, as a named tuple Mood. This gets it from the cache if available, or else gets it from Spotify, and then adds it to song_id_to_mood.
     """
-    pass
+    if song_id in song_id_to_mood:
+        return song_id_to_mood[song_id]
+    else:
+        res = spotify_client.track_audio_features(song_id)
+        mood = (res['valence'], res['energy'], res['danceability'])
+        song_id_to_mood[song_id] = mood
+        return mood
 
 def _get_song_meta(song_id: str, auth: str) -> Tuple:
     """
@@ -104,20 +110,14 @@ def set_mood(mood: str, auth: str):
     """
     Set the mood and creates a new queue based on that.
     """
-    data[auth]['mood'] = mood
+    user_data[auth]['mood'] = mood
     # TODO
 
 def get_next_songs(index: int, auth: str, num=10) -> List[Dict]:
     """
     Return the next `num` songs to play. index is the index of the next song.
     """
-    queue = _get_queue(auth)[num]
-
-def _get_lyrics_sentiment(song_id: str, auth: str) -> float:
-    """
-    Return the sentiment of the song corresponding to the given ID, using sentiment analysis on the lyrics, which are from the Genius API.
-    """
-    pass
+    queue = _get_queue(auth)[:num]
 
 def dequeue_song(auth: str, song_id: str):
     """
@@ -125,12 +125,21 @@ def dequeue_song(auth: str, song_id: str):
     """
     pass
 
-# TODO, not super important
+def _get_lyrics_sentiment(song_id: str, auth: str) -> float:
+    """
+    Return the sentiment of the song corresponding to the given ID, using sentiment analysis on the lyrics, which are from the Genius API.
+    """
+    pass
+
 def export_playlist(auth: str):
     """
     Create a Spotify playlist from what the user has played.
     """
-    pass
+    user = spotify_client.user_from_token(auth)
+    playlist = user.create_playlist('feels', description='sample')
+    for track_id in user_data[auth]['playlist']:
+        track_obj = spotify_client.get_track(track_id)
+        user.add_tracks(playlist, track_obj)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
