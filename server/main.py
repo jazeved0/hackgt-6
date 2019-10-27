@@ -9,7 +9,9 @@ from typing import Dict, Tuple, Optional
 import math
 from math import ceil
 import numpy as np
+from scipy.spatial.distance import euclidean
 from spoot import *
+import asyncio
 
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
@@ -60,14 +62,19 @@ class MoodPlaylist:
         `new`: True if it's a brand new playlist and so we should sort the entire playlist, and False if we only want to sort the songs starting with `index + 1`.
         `threshold`: maximum distance between the mood of a song and `self.mood`. `self.end` will be set such that songs that exceed this threshold will not be played.
         """
-        dist = lambda track_id: np.linalg.norm(_get_song_mood(track_id), self.mood)
+        track_moods = _get_song_moods(self.track_ids)
+        track_id_to_mood = {self.track_ids[i]: track_moods[i] for i in range(len(self.track_ids))}
+        print(type(track_moods[0]))
+        print(type(track_id_to_mood))
+        print(type(track_id_to_mood[self.track_ids[0]]))
+        dist = lambda track_id: euclidean(track_id_to_mood[track_id], self.mood)
         if new:
             self.track_ids.sort(key=dist)
         else:
             self.track_ids[index + 1:] = self.track_ids.sorted(key=dist)
         self.end = len(self.track_ids)
         for i, track_id in enumerate(self.track_ids):
-            if dist(_get_song_mood(track_id)) > threshold:
+            if dist(track_id) > threshold:
                 self.end = i
         for i in range(self.index, self.end):
             j = random.randint(i, min(i + 5, self.end - 1))
@@ -133,26 +140,56 @@ def _get_song_mood(song_id: str) -> Mood:
     if song_id in song_mood:
         return song_mood[song_id]
     else:
-        res = client.track_audio_features(song_id)
-        mood = (res['valence'], res['energy'], res['danceability'])
-        song_mood[song_id] = mood
-        return mood
+        try:
+            res = client.http.request(client.http.route("GET", "/audio-features/{id}", id=song_id))
+            mood = (res['valence'], res['energy'], res['danceability'])
+            song_mood[song_id] = mood
+            return mood
+        except:
+            return (0, 0, 0)
+
+def divide_chunks(l, n):
+    for i in range(0, len(l), n):  
+        yield l[i:i + n] 
+
+def _get_song_moods(song_ids: List[str]) -> List[Mood]:
+    mapping = {song_id: song_mood[song_id] for song_id in song_ids if song_id in song_mood}
+    non_cached = [song_id for song_id in song_ids if song_id not in song_mood]
+    song_id_groups = list(divide_chunks(non_cached, 100))
+    for group in song_id_groups:
+        formatted_group = ",".join(group)
+        res = client.http.request(client.http.route("GET", "/audio-features?ids={ids}", ids=formatted_group))
+        res = res["audio_features"]
+        for i in range(len(group)):
+            data = res[i]
+            mood = (data['valence'], data['energy'], data['danceability'])
+            mapping[group[i]] = res[i]
+            song_mood[group[i]] = res[i]
+    return [mapping[song_ids[i]] for i in range(len(song_ids))]
 
 def _nearest_moods(token: str) -> Dict[str, float]:
     """
     Returns what two moods the current mood of the playlist is closest to.
+
+    Example return value:
+    {
+        'adele': 0.4,
+        'hide the tears': 0.6
+    }
     """
     # Reverse mapping from mood name to its distance from the current mood.
     mood_dists: Dict[float, str] = {}
     for mood_name, mood_vec in mood_names:
-        dist = np.linalg.norm(mood_vec, playlists[token].mood)
+        dist = euclidean(mood_vec, playlists[token].mood)
         mood_dists[dist] = mood_name
     dists_sorted = mood_dists.keys.sorted()
+    i = 0
+    for mood_name in mood_names:
+        pass # TODO
     sum_of_dists = math.sqrt(mood_dists[dists_sorted[0]]) + math.sqrt(mood_dists[dists_sorted[1]])
-    top_two_mood_names = math.sqrt(mood_dists[dists_sorted[0]])/sum_of_dists,  math.sqrt(mood_dists[dists_sorted[1]])/sum_of_dists
+    proportions = (math.sqrt(mood_dists[dists_sorted[0]])/sum_of_dists,  math.sqrt(mood_dists[dists_sorted[1]])/sum_of_dists)
+
     return top_two_mood_names
-    
-    return 
     # TODO: Project the current mood onto the line connecting the two nearest moods. Return what percent of one mood it is compared to another.
 
 
@@ -188,10 +225,12 @@ def new_playlist() -> Response:
     except ValueError as e:
         message = 'Incorrect parameter types'
         print(message + ' ' + repr(e))
+        raise e
         return {'message': message}, 405
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
+        raise e
         return {'message': message}, 400
 
 @app.route('/playlist/extend', methods=['GET'])
@@ -215,6 +254,7 @@ def get_next_songs() -> Response:
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
+        raise e
         return {'message': message}, 400
 
 @app.route('/playlist/like', methods=['POST'])
@@ -239,6 +279,7 @@ def like() -> Response:
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
+        raise e
         return {'message': message}, 400
 
 @app.route('/playlist/dislike', methods=['POST'])
@@ -262,6 +303,7 @@ def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Resp
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
+        raise e
         return {'message': message}, 400
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
