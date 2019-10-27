@@ -192,7 +192,6 @@ export default function Player({ navigation }) {
           `${url}/playlist/dislike?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}&was_skip=true`
         )
         .then(({ data }) => {
-          console.log(data);
           const previousQueue = queue.slice(0, position + 2);
           const previousLoaded = loaded.slice(0, position + 2);
           const newLoaded = [...new Array(data.queue.length)].map(_ => false);
@@ -236,7 +235,6 @@ export default function Player({ navigation }) {
                   `${url}/playlist/extend?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}`
                 )
                 .then(({ data }) => {
-                  console.log(data);
                   const newLoaded = [...new Array(data.queue.length)].map(
                     _ => false
                   );
@@ -275,14 +273,14 @@ export default function Player({ navigation }) {
     const id = queue[position];
     if (!likedSongSet.has(id)) {
       likedSongSet.add(id);
+      const i = position;
       axios
         .post(
           `${url}/playlist/like?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}`
         )
         .then(({ data }) => {
-          console.log(data);
-          const previousQueue = queue.slice(0, position + 2);
-          const previousLoaded = loaded.slice(0, position + 2);
+          const previousQueue = queue.slice(0, i + 2);
+          const previousLoaded = loaded.slice(0, i + 2);
           const newLoaded = [...new Array(data.queue.length)].map(_ => false);
           setQueue([...previousQueue, ...data.queue]);
           setLoaded([...previousLoaded, ...newLoaded]);
@@ -292,21 +290,14 @@ export default function Player({ navigation }) {
   const onDislike = () => {
     albumSliderRef.current.next();
     playFromStart(position + 1);
+    const i = position;
     axios
       .post(
         `${url}/playlist/dislike?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}&was_skip=false`
       )
       .then(({ data }) => {
-        console.log("data");
-        console.log(data);
-        console.log("queue");
-        console.log(queue);
-        const previousQueue = queue.slice(0, position + 2);
-        console.log("prevQueue");
-        console.log(previousQueue);
-        console.log("nextQueue");
-        console.log([...previousQueue, ...data.queue]);
-        const previousLoaded = loaded.slice(0, position + 2);
+        const previousQueue = queue.slice(0, i + 2);
+        const previousLoaded = loaded.slice(0, i + 2);
         const newLoaded = [...new Array(data.queue.length)].map(_ => false);
         setQueue([...previousQueue, ...data.queue]);
         setLoaded([...previousLoaded, ...newLoaded]);
