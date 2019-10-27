@@ -21,7 +21,7 @@ api = Api(app)
 Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
 class MoodPlaylist:
-    def __init__(self, token: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]] = None, index: Optional[int] = -1, end: Optional[int] = None):
+    def __init__(self, token: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]] = None, index: int = -1, end: Optional[int] = None):
         """
         `token` is the user token
         `mood` is the current mood according to which we'll sort the songs.
@@ -33,6 +33,7 @@ class MoodPlaylist:
         self.token = token
         self.mood = mood
         self.play_saved_tracks = play_saved_tracks
+        self.index = index
         if track_ids:
             self.track_ids = track_ids
         else:
@@ -41,7 +42,6 @@ class MoodPlaylist:
             else:
                 self.track_ids = user_top_trackss(token)
             self._sort(True)
-        self.index = index
         self.end = end if end is not None else len(self.track_ids)
     
     def get_queue(self, length: int = None) -> List[str]:
@@ -64,9 +64,6 @@ class MoodPlaylist:
         """
         track_moods = _get_song_moods(self.track_ids)
         track_id_to_mood = {self.track_ids[i]: track_moods[i] for i in range(len(self.track_ids))}
-        print(type(track_moods[0]))
-        print(type(track_id_to_mood))
-        print(type(track_id_to_mood[self.track_ids[0]]))
         dist = lambda track_id: euclidean(track_id_to_mood[track_id], self.mood)
         if new:
             self.track_ids.sort(key=dist)
@@ -163,8 +160,8 @@ def _get_song_moods(song_ids: List[str]) -> List[Mood]:
         for i in range(len(group)):
             data = res[i]
             mood = (data['valence'], data['energy'], data['danceability'])
-            mapping[group[i]] = res[i]
-            song_mood[group[i]] = res[i]
+            mapping[group[i]] = mood
+            song_mood[group[i]] = mood
     return [mapping[song_ids[i]] for i in range(len(song_ids))]
 
 def _nearest_moods(token: str) -> Dict[str, float]:
