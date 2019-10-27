@@ -7,7 +7,7 @@ import requests
 from collections import namedtuple
 from typing import Dict, Tuple, Any, Optional
 from math import ceil
-import numpy
+import numpy as np
 
 app = Flask(__name__)
 spotify_client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
@@ -52,32 +52,11 @@ class MoodPlaylist:
         """
         return self.track_ids[self.index + 1 : self.end]
 
-    @staticmethod
-    def _dist(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-        """
-        Return the squared Euclidean distance between two 3-dimensional points.
-        """
-        return (a[0] - b[0])**2 + (a[1] - b[1])**2 + (a[2] - b[2])**2
-
-    @staticmethod
-    def _vector_diff(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-        """
-        Return b - a, where a and b are three-dimensional vectors.
-        """
-        return (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-
-    @staticmethod
-    def _vector_add(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-        """
-        Return a + b, where a and b are three-dimensional vectors.
-        """
-        return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
-
     def sort(self, new_mood: Mood) -> None:
         """
         Sort songs based on the set mood, such that the songs closer to that mood are first. `index + 1` is the index of the next song; i.e., the first song of the newly sorted portion of the playlist.
         """
-        self.track_ids.sort(key=lambda track_id: self._dist(song_id_to_mood[track_id], new_mood))
+        self.track_ids.sort(key=lambda track_id: np.linalg.norm(song_mood[track_id], new_mood))
         # TODO
         for i in range(self.index, (self.end - self.index)):
             pass
@@ -89,29 +68,34 @@ class MoodPlaylist:
         self.mood = new_mood
         self.sort(new_mood)
 
+    def _like_or_dislike(self, index: int, scale: float) -> None:
+        """
+        Update the mood in the direction of the current song, which has an id equal to `self.track_ids[index]`. We calculate the vector from the current mood to the mood of the current song, and update according to that multiplied by `scale`.
+        """
+        current_track_mood = _get_song_mood(self.track_ids[index])
+        delta = np.subtract(current_track_mood, self.mood)
+        self.mood = np.add(self.mood, np.multiply(delta, scale))
+
     def like(self, index: int) -> None:
         """
         Update the mood in the direction of the current song, which has an id equal to `self.track_ids[index]`.
         """
-        current_track_mood = _get_song_mood(self.track_ids[index])
-        delta = self._vector_diff(current_track_mood, self.mood)
-        self.mood = self._vector_add(self.mood, (t/2 for t in delta))
+        self._like_or_dislike(index, 0.5)
 
     def dislike(self, index: int) -> None:
         """
         Update the mood in the direction opposite to the current song, which has an id equal to `self.track_ids[index]`.
         """
-        current_track_mood = _get_song_mood(self.track_ids[index])
-        delta = self._vector_diff(self.mood, current_track_mood)
-        self.mood = self._vector_add(self.mood, (t/2 for t in delta))
+        self._like_or_dislike(index, -0.5)
 
     
-# Map user id to their desired mood and their queue.
+# Map user IDs to their corresponding MoodPlaylist.
 playlists: Dict[str, MoodPlaylist] = {}
 
-# Map a song id to its Mood.
-song_id_to_mood: Dict[str, Mood] = {}
+# Map a song ID to its Mood.
+song_mood: Dict[str, Mood] = {}
 
+# Map mood names to their Mood vector.
 mood_names: Dict[str, Mood] = {
     'upbeat': (1, 1, 0),
     'slow dance': (1, 0, 1),
@@ -154,12 +138,12 @@ def _get_song_mood(song_id: str, auth: str) -> Mood:
     """
     Return the song features for the given song ID, as a named tuple Mood. This gets it from the cache if available, or else gets it from Spotify, and then adds it to song_id_to_mood.
     """
-    if song_id in song_id_to_mood:
-        return song_id_to_mood[song_id]
+    if song_id in song_mood:
+        return song_mood[song_id]
     else:
         res = spotify_client.track_audio_features(song_id)
         mood = (res['valence'], res['energy'], res['danceability'])
-        song_id_to_mood[song_id] = mood
+        song_mood[song_id] = mood
         return mood
 
 def new_playlist(play_saved_tracks: bool, mood_str: str, auth: str) -> None:
