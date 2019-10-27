@@ -59,3 +59,4 @@ buck-out/
 
 server/env.sh
 **/__pycache__
+.vscode

@@ -3,6 +3,8 @@ package com.hackgt6;
 import android.app.Application;
 
 import com.facebook.react.ReactApplication;
+import com.surajit.rnrg.RNRadialGradientPackage;
+import com.horcrux.svg.SvgPackage;
 import com.lufinkey.react.eventemitter.RNEventEmitterPackage;
 import com.lufinkey.react.spotify.RNSpotifyPackage;
 import com.facebook.react.ReactNativeHost;
@@ -42,6 +44,8 @@ public class MainApplication extends Application implements ReactApplication {
     protected List<ReactPackage> getPackages() {
       return Arrays.<ReactPackage>asList(
           new MainReactPackage(),
+            new RNRadialGradientPackage(),
+            new SvgPackage(),
             new RNEventEmitterPackage(),
             new RNSpotifyPackage(),
           new ReanimatedPackage(),
