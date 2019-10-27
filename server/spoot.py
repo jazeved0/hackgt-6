@@ -44,4 +44,4 @@ def user_top_trackss(token: str) -> List[str]:
     """
     Return the track IDs of the user's top tracks concatenated with the top 10 tracks for each of the user's top 50 artists.
     """
-    return user_top_tracks(token) + [*artist_top_tracks(artist_id) for artist_id in user_top_artists(token)]
+    return user_top_tracks(token) + [t for t in artist_top_tracks(artist_id) for artist_id in user_top_artists(token)]

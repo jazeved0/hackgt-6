@@ -1,4 +1,4 @@
-from flask import Flask, flash, redirect, render_template, request, session, abort
+from flask import Flask, request, jsonify, Response
 import sys
 import os
 import random
@@ -7,7 +7,7 @@ from collections import namedtuple
 from typing import Dict, Tuple, Optional
 from math import ceil
 import numpy as np
-from .spoot import *
+from spoot import *
 
 app = Flask(__name__)
 
@@ -38,11 +38,16 @@ class MoodPlaylist:
         self.index = index
         self.end = end if end is not None else len(self.track_ids)
     
-    def get_queue(self) -> List[str]:
+    def get_queue(self, length: int = None) -> List[str]:
         """
         Return song IDs of songs that will be played up next.
+
+        `length`: number of song IDs to return.
         """
-        return self.track_ids[self.index + 1 : self.end]
+        if length:
+            return self.track_ids[self.index + 1 : self.end][:length]
+        else:
+            return self.track_ids[self.index + 1 : self.end]
 
     def _sort(self, new: bool, threshold=0.4) -> None:
         """
@@ -134,13 +139,19 @@ def _nearest_moods(token: str) -> Dict[str, float]:
     Returns what two moods the current mood of the playlist is closest to.
     """
     # Reverse mapping from mood name to its distance from the current mood.
-    mood_closeness: Dict[float, str] = {}
-    # for k, v in mood_names:  
+    mood_dists: Dict[float, str] = {}
+    for mood_name, mood_vec in mood_names:
+        dist = np.linalg.norm(mood_vec, playlists[token].mood)
+        mood_dists[dist] = mood_name
+    dists_sorted = mood_dists.keys.sorted()
+    top_two_mood_names = mood_dists[dists_sorted[0]], mood_dists[dists_sorted[1]]
+    # TODO: Project the current mood onto the line connecting the two nearest moods. Return what percent of one mood it is compared to another.
+
 
 @app.route('/playlist/new', methods=['GET'])
-def new_playlist(token: str, mood: str, play_saved_tracks: bool, request_length: int) -> List[str]:
+def new_playlist(token: str, mood: str, play_saved_tracks: bool, request_length: int) -> Response:
     """
-    Create a new mood playlist. Returns the first `request_length` track IDs of the new playlist.
+    Create a new mood playlist. Returns the first `request_length` track IDs of the new playlist, which is a List[str], as a JSON response.
 
     `play_saved_tracks`: whether we want to play from saved tracks (True) or from top charts (False)
     `mood`: a string representing the mood of the new playlist, such as 'sad bops' or 'adele'
@@ -152,30 +163,30 @@ def new_playlist(token: str, mood: str, play_saved_tracks: bool, request_length:
         playlists[token] = MoodPlaylist(token, mood, play_saved_tracks)
     else:
         playlists[token].new_mood(mood)
-    return playlists[token].get_queue()
+    return jsonify(queue=playlists[token].get_queue())
 
 @app.route('/playlist/extend', methods=['GET'])
-def get_next_songs(token: str, index: int, request_length=10) -> List[str]:
+def get_next_songs(token: str, index: int, request_length: int) -> Response:
     """
-    Return the next `num` songs to play. `index` is the index of the current song.
+    Return the next `num` songs to play, which is a List[str], as a JSON response. `index` is the index of the current song.
     """
     playlists[token].index = index
-    queue = playlists[token].get_queue()[:request_length]
+    return jsonify(queue=playlists[token].get_queue(request_length))
 
 @app.route('/playlist/like', methods=['POST'])
-def like(token: str, index: int, request_length: int) -> List[str]:
+def like(token: str, index: int, request_length: int) -> Response:
     """
     Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the subsequent songs. 
     """
     playlists[token].index = index
     playlists[token].like()
-    return playlists[token].get_queue(request_length)
+    return jsonify(queue=playlists[token].get_queue(request_length))
 
 @app.route('/playlist/dislike', methods=['POST'])
-def dislike(token: str, index: int, request_length: int, was_skip: bool) -> List[str]:
+def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Response:
     playlists[token].index = index
     playlists[token].dislike(was_skip)
-    return playlists[token].get_queue(request_length)
+    return jsonify(queue=playlists[token].get_queue(request_length))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
