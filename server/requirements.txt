@@ -1,0 +1,6 @@
+flask
+flask_restful
+requests
+numpy
+scipy
+spotify

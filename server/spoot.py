@@ -1,8 +1,13 @@
 import spotify.sync as spotify
 import os
 from typing import List, Tuple, Dict
+import asyncio
 
-client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
+try:
+    client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
+except TypeError as e:
+    print('Did you remember to set environment variables CLIENT_ID and CLIENT_SECRET?')
+    raise e
 
 # https://spotifypy.readthedocs.io/en/latest/api.html
 
@@ -12,14 +17,18 @@ def fetch_saved_tracks(token: str) -> List[str]:
 
     `token`: user token
     """
-    user = client.user_from_token(token)
-    saved_tracks = user.top_artists(limit=50)
-    return [artist.id for artist in saved_tracks]
+    library = spotify.Library(client, client.user_from_token(token))
+    saved_tracks = library.get_all_tracks()
+    output = [track.id for track in saved_tracks]
+    # print(output)
+    return output
 
 def fetch_playlist(playlist_id: str) -> List[str]:
     playlist = client.get_playlist(playlist_id)
     tracks = playlist.get_all_tracks()
-    return [track.id for track in tracks]
+    output = [track.id for track in tracks]
+    print(output)
+    return output
 
 def user_top_tracks(token: str) -> List[str]:
     """
@@ -44,4 +53,4 @@ def user_top_trackss(token: str) -> List[str]:
     """
     Return the track IDs of the user's top tracks concatenated with the top 10 tracks for each of the user's top 50 artists.
     """
-    return user_top_tracks(token) + [*artist_top_tracks(artist_id) for artist_id in user_top_artists(token)]
+    return user_top_tracks(token) + [t for t in artist_top_tracks(artist_id) for artist_id in user_top_artists(token)]

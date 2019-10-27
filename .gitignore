@@ -58,3 +58,4 @@ buck-out/
 *.jsbundle
 
 server/env.sh
+**/__pycache__
