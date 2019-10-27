@@ -11,24 +11,17 @@ from .spoot import *
 
 app = Flask(__name__)
 
-"""
-https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/
-- valence
-- danceability (based on tempo, rhythm stability, beat strength, regularity)
-- energy
-- loudness
-- tempo
-"""
+# https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/
 Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
 class MoodPlaylist:
-    def __init__(self, auth: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]], index: Optional[int], end: Optional[int]):
+    def __init__(self, auth: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]], index: Optional[int] = -1, end: Optional[int] = None):
         """
         `auth` is the user token
         `mood` is the current mood according to which we'll sort the songs.
         `play_saved_tracks` is True if we are playing from the user's saved tracks (or liked songs) and False if we are playing from the all of Spotify (more specifically, the most popular tracks at https://spotifycharts.com/regional)
         `track_ids` is a list of all track_ids, both played and unplayed.
-        `index` is the index within `track_ids` of the currently playing song.
+        `index` is the index within `track_ids` of the currently playing song. This defaults to -1 so that the next song is index 0.
         `end` is 1 greater than the index of the last song within `track_ids` that we want to play; the last song that meets a certain threshold of closeness to the desired mood.
         """
         self.auth = auth
@@ -42,8 +35,8 @@ class MoodPlaylist:
             else:
                 track_ids = user_top_trackss(auth)
             self._sort(True)
-        self.index = index if index else 0
-        self.end = end if end else len(self.track_ids)
+        self.index = index
+        self.end = end if end is not None else len(self.track_ids)
     
     def get_queue(self) -> List[str]:
         """
@@ -58,14 +51,16 @@ class MoodPlaylist:
         `new`: True if it's a brand new playlist and so we should sort the entire playlist, and False if we only want to sort the songs starting with `index + 1`.
         `threshold`: maximum distance between the mood of a song and `self.mood`. `self.end` will be set such that songs that exceed this threshold will not be played.
         """
-        comparator = lambda track_id: np.linalg.norm(song_mood[track_id], self.mood)
+        comparator = lambda track_id: np.linalg.norm(_get_song_mood(track_id), self.mood)
         if new:
             self.track_ids.sort(key=comparator)
         else:
             self.track_ids[index + 1:] = self.track_ids.sorted(key=comparator)
-        # TODO: set self.end
-        # TODO
-        for i in range(self.index, (self.end - self.index)):
+        self.end = len(self.track_ids)
+        for i, track_id in enumerate(self.track_ids):
+            if comparator(_get_song_mood(track_id)) > threshold:
+                self.end = i
+        for i in range(self.index, self.end):
             pass
 
     def new_mood(self, mood: Mood) -> None:
@@ -133,37 +128,45 @@ def _get_song_mood(song_id: str, auth: str) -> Mood:
         song_mood[song_id] = mood
         return mood
 
-def new_playlist(play_saved_tracks: bool, mood_str: str, auth: str) -> None:
+@app.route('/playlist/new', methods=['GET'])
+def new_playlist(auth: str, mood: str, play_saved_tracks: bool, request_length: int) -> List[str]:
     """
-    Create a new mood playlist.
+    Create a new mood playlist. Returns the first `request_length` track IDs of the new playlist.
 
     `play_saved_tracks`: whether we want to play from saved tracks (True) or from top charts (False)
-    `mood_str`: a string representing the mood of the new playlist, such as 'sad bops' or 'adele'
+    `mood`: a string representing the mood of the new playlist, such as 'sad bops' or 'adele'
+    `request_length`: number of track IDs to return
     `auth`: user token
     """
-    mood: Mood = mood_names[mood_str]
+    mood: Mood = mood_names[mood]
     if not playlists[auth] or playlists[auth].play_saved_tracks != play_saved_tracks:
         playlists[auth] = MoodPlaylist(auth, mood, play_saved_tracks)
     else:
         playlists[auth].new_mood(mood)
+    return playlists[auth].get_queue()
 
-def get_next_songs(index: int, auth: str, num=10) -> List[Dict]:
+@app.route('/playlist/extend', methods=['GET'])
+def get_next_songs(auth: str, index: int, request_length=10) -> List[str]:
     """
     Return the next `num` songs to play. `index` is the index of the current song.
     """
     playlists[auth].index = index
-    queue = playlists[auth].get_queue()[:num]
+    queue = playlists[auth].get_queue()[:request_length]
 
-def like(auth: str, index: int):
+@app.route('/playlist/like', methods=['POST'])
+def like(auth: str, index: int, request_length: int) -> List[str]:
     """
     Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the subsequent songs. 
     """
     playlists[auth].index = index
     playlists[auth].like()
+    return playlists[auth].get_queue(request_length)
 
-def dislike(auth: str, index: int):
+@app.route('/playlist/dislike', methods=['POST'])
+def dislike(auth: str, index: int, request_length: int, was_skip: bool) -> List[str]:
     playlists[auth].index = index
-    playlists[auth].dislike()
+    playlists[auth].dislike(was_skip)
+    return playlists[auth].get_queue(request_length)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
