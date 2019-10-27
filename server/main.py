@@ -42,7 +42,7 @@ class MoodPlaylist:
                 track_ids = _fetch_saved_tracks(auth)
             else:
                 track_ids = _fetch_popular(auth)
-            self.sort(mood)
+            self._sort(True)
         self.index = index if index else 0
         self.end = end if end else len(self.track_ids)
     
@@ -52,41 +52,51 @@ class MoodPlaylist:
         """
         return self.track_ids[self.index + 1 : self.end]
 
-    def sort(self, new_mood: Mood) -> None:
+    def _sort(self, new: bool, threshold=0.4) -> None:
         """
-        Sort songs based on the set mood, such that the songs closer to that mood are first. `index + 1` is the index of the next song; i.e., the first song of the newly sorted portion of the playlist.
+        Sort songs based on the current mood, such that the songs closer to that mood are first. This is meant to be called after changing the mood.
+
+        `new`: True if it's a brand new playlist and so we should sort the entire playlist, and False if we only want to sort the songs after `index + 1`.
+        `threshold`: maximum distance between the mood of a song and `self.mood`. `self.end` will be set such that songs that exceed this threshold will not be played.
         """
-        self.track_ids.sort(key=lambda track_id: np.linalg.norm(song_mood[track_id], new_mood))
+        comparator = lambda track_id: np.linalg.norm(song_mood[track_id], self.mood)
+        if new:
+            self.track_ids.sort(key=comparator)
+        else:
+            self.track_ids[index:] = self.track_ids.sorted(key=comparator)
+        # TODO: set self.end        
         # TODO
         for i in range(self.index, (self.end - self.index)):
             pass
 
-    def set_mood(self, new_mood: Mood) -> None:
+    def new_mood(self, mood: Mood) -> None:
         """
-        Sets the mood to the given mood and calls `sort` accordingly.
+        Sets the mood to `mood`, resets the index, and calls `_sort`.
         """
-        self.mood = new_mood
-        self.sort(new_mood)
+        self.index = 0
+        self.mood = mood
+        self._sort(True)
 
-    def _like_or_dislike(self, index: int, scale: float) -> None:
+    def _like_or_dislike(self, scale: float) -> None:
         """
-        Update the mood in the direction of the current song, which has an id equal to `self.track_ids[index]`. We calculate the vector from the current mood to the mood of the current song, and update according to that multiplied by `scale`.
+        Update the mood in the direction of the current song, which has an id equal to `self.track_ids[self.index]`. We calculate the vector from the current mood to the mood of the current song, and update according to that multiplied by `scale`.
         """
-        current_track_mood = _get_song_mood(self.track_ids[index])
+        current_track_mood = _get_song_mood(self.track_ids[self.index])
         delta = np.subtract(current_track_mood, self.mood)
         self.mood = np.add(self.mood, np.multiply(delta, scale))
+        self._sort(False)
 
-    def like(self, index: int) -> None:
+    def like(self) -> None:
         """
-        Update the mood in the direction of the current song, which has an id equal to `self.track_ids[index]`.
+        Update the mood in the direction of the current song, which has an id equal to `self.track_ids[self.index]`.
         """
-        self._like_or_dislike(index, 0.5)
+        self._like_or_dislike(0.5)
 
-    def dislike(self, index: int) -> None:
+    def dislike(self) -> None:
         """
-        Update the mood in the direction opposite to the current song, which has an id equal to `self.track_ids[index]`.
+        Update the mood in the direction opposite to the current song, which has an id equal to `self.track_ids[self.index]`.
         """
-        self._like_or_dislike(index, -0.5)
+        self._like_or_dislike(-0.5)
 
     
 # Map user IDs to their corresponding MoodPlaylist.
@@ -115,16 +125,14 @@ def _fetch_saved_tracks(auth: str, country='US') -> List[str]:
     `auth`: Authorization ID for the given user.
     `country`: Two-letter abbreviation for the country the user is currently in. This is used to check that a given song in the playlist is available.
     """
-    res: Dict = spotify_client.saved_tracks(limit=50)
-    song_items: List[Dict] = res['items']
-    song_ids: List[str] = [item['track']['id'] for item in song_items if country in item['track']['available markets']]
-    total: int = res['total'] # number of tracks in saved tracks
-    if total > 50:
-        for offset in range(50, total, 50):
-            res: Dict = spotify_client.saved_tracks(limit=50, offset=offset)
-            res.raise_for_status()
-            song_items: List[Dict] = res['items']
-            song_ids += [item['track']['id'] for item in song_items if country in item['track']['available markets']]
+    total = float('inf')
+    song_ids = []
+    offset = 0
+    while offset < total:
+        res: Dict = spotify_client.saved_tracks(limit=50, offset=offset)
+        song_ids += [item['track']['id'] for item in res['items'] if country in item['track']['available markets']]
+        total: int = res['total'] # this doesn't need to be set every iteration but it's simpler to do it this way
+        offset += 50
     return song_ids
 
 # TODO
@@ -158,19 +166,25 @@ def new_playlist(play_saved_tracks: bool, mood_str: str, auth: str) -> None:
     if not playlists[auth] or playlists[auth].play_saved_tracks != play_saved_tracks:
         playlists[auth] = MoodPlaylist(auth, mood, play_saved_tracks)
     else:
-        playlists[auth].set_mood(mood)
+        playlists[auth].new_mood(mood)
 
 def get_next_songs(index: int, auth: str, num=10) -> List[Dict]:
     """
     Return the next `num` songs to play. `index` is the index of the current song.
     """
+    playlists[auth].index = index
     queue = playlists[auth].get_queue()[:num]
 
 def like(auth: str, index: int):
-    playlists[auth].like(index)
+    """
+    Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the subsequent songs. 
+    """
+    playlists[auth].index = index
+    playlists[auth].like()
 
 def dislike(auth: str, index: int):
-    playlists[auth].dislike(index)
+    playlists[auth].index = index
+    playlists[auth].dislike()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
