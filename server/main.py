@@ -1,21 +1,25 @@
 from flask import Flask, request, jsonify, Response
+from flask_restful import reqparse, Api, Resource
 import sys
 import os
 import random
 import requests
 from collections import namedtuple
 from typing import Dict, Tuple, Optional
+import math
 from math import ceil
 import numpy as np
 from spoot import *
 
 app = Flask(__name__)
+app.config['JSON_SORT_KEYS'] = False
+api = Api(app)
 
 # https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/
 Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
 class MoodPlaylist:
-    def __init__(self, token: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]], index: Optional[int] = -1, end: Optional[int] = None):
+    def __init__(self, token: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]] = None, index: Optional[int] = -1, end: Optional[int] = None):
         """
         `token` is the user token
         `mood` is the current mood according to which we'll sort the songs.
@@ -31,9 +35,9 @@ class MoodPlaylist:
             self.track_ids = track_ids
         else:
             if play_saved_tracks:
-                track_ids = fetch_saved_tracks(token)
+                self.track_ids = fetch_saved_tracks(token)
             else:
-                track_ids = user_top_trackss(token)
+                self.track_ids = user_top_trackss(token)
             self._sort(True)
         self.index = index
         self.end = end if end is not None else len(self.track_ids)
@@ -122,7 +126,7 @@ mood_names: Dict[str, Mood] = {
     'depressed': (0, 0, 0)
 }
 
-def _get_song_mood(song_id: str, token: str) -> Mood:
+def _get_song_mood(song_id: str) -> Mood:
     """
     Return the song features for the given song ID, as a named tuple Mood. This gets it from the cache if available, or else gets it from Spotify, and then adds it to song_id_to_mood.
     """
@@ -144,12 +148,16 @@ def _nearest_moods(token: str) -> Dict[str, float]:
         dist = np.linalg.norm(mood_vec, playlists[token].mood)
         mood_dists[dist] = mood_name
     dists_sorted = mood_dists.keys.sorted()
-    top_two_mood_names = mood_dists[dists_sorted[0]], mood_dists[dists_sorted[1]]
+    sum_of_dists = math.sqrt(mood_dists[dists_sorted[0]]) + math.sqrt(mood_dists[dists_sorted[1]])
+    top_two_mood_names = math.sqrt(mood_dists[dists_sorted[0]])/sum_of_dists,  math.sqrt(mood_dists[dists_sorted[1]])/sum_of_dists
+    return top_two_mood_names
+    
+    return 
     # TODO: Project the current mood onto the line connecting the two nearest moods. Return what percent of one mood it is compared to another.
 
 
 @app.route('/playlist/new', methods=['GET'])
-def new_playlist(token: str, mood: str, play_saved_tracks: bool, request_length: int) -> Response:
+def new_playlist() -> Response:
     """
     Create a new mood playlist. Returns the first `request_length` track IDs of the new playlist, which is a List[str], as a JSON response.
 
@@ -158,35 +166,102 @@ def new_playlist(token: str, mood: str, play_saved_tracks: bool, request_length:
     `request_length`: number of track IDs to return
     `token`: user token
     """
-    mood: Mood = mood_names[mood]
-    if not playlists[token] or playlists[token].play_saved_tracks != play_saved_tracks:
-        playlists[token] = MoodPlaylist(token, mood, play_saved_tracks)
-    else:
-        playlists[token].new_mood(mood)
-    return jsonify(queue=playlists[token].get_queue())
+    parser = reqparse.RequestParser()
+    parser.add_argument('token', type=str, required=True)
+    parser.add_argument('mood', type=str, required=True)
+    parser.add_argument('play_saved_tracks', type=bool, required=True)
+    parser.add_argument('request_length', type=int, required=True)
+    args = parser.parse_args()
+
+    try:
+        token: str = args['token']
+        mood: str = args['mood']
+        play_saved_tracks: bool = args['play_saved_tracks']
+        request_length: int = args['request_length']
+
+        mood: Mood = mood_names[mood]
+        if token not in playlists or playlists[token].play_saved_tracks != play_saved_tracks:
+            playlists[token] = MoodPlaylist(token, mood, play_saved_tracks)
+        else:
+            playlists[token].new_mood(mood)
+        return jsonify(queue=playlists[token].get_queue(request_length))
+    except ValueError as e:
+        message = 'Incorrect parameter types'
+        print(message + ' ' + repr(e))
+        return {'message': message}, 405
+    except Exception as e:
+        message = 'Unknown error: ' + repr(e)
+        print(message)
+        return {'message': message}, 400
 
 @app.route('/playlist/extend', methods=['GET'])
-def get_next_songs(token: str, index: int, request_length: int) -> Response:
+def get_next_songs() -> Response:
     """
     Return the next `num` songs to play, which is a List[str], as a JSON response. `index` is the index of the current song.
     """
-    playlists[token].index = index
-    return jsonify(queue=playlists[token].get_queue(request_length))
+    parser = reqparse.RequestParser()
+    parser.add_argument('token', type=str, required=True)
+    parser.add_argument('index', type=int, required=True)
+    parser.add_argument('request_length', type=int, required=True)
+    args = parser.parse_args()
+
+    try:
+        token: str = args['token']
+        index: int = args['index']
+        request_length: int = args['request_length']
+
+        playlists[token].index = index
+        return jsonify(queue=playlists[token].get_queue(request_length))
+    except Exception as e:
+        message = 'Unknown error: ' + repr(e)
+        print(message)
+        return {'message': message}, 400
 
 @app.route('/playlist/like', methods=['POST'])
-def like(token: str, index: int, request_length: int) -> Response:
+def like() -> Response:
     """
     Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the subsequent songs. 
     """
-    playlists[token].index = index
-    playlists[token].like()
-    return jsonify(queue=playlists[token].get_queue(request_length))
+    parser = reqparse.RequestParser()
+    parser.add_argument('token', type=str, required=True)
+    parser.add_argument('index', type=int, required=True)
+    parser.add_argument('request_length', type=int, required=True)
+    args = parser.parse_args()
+
+    try:
+        token: str = args['token']
+        index: int = args['index']
+        request_length: int = args['request_length']
+
+        playlists[token].index = index
+        playlists[token].like()
+        return jsonify(queue=playlists[token].get_queue(request_length))
+    except Exception as e:
+        message = 'Unknown error: ' + repr(e)
+        print(message)
+        return {'message': message}, 400
 
 @app.route('/playlist/dislike', methods=['POST'])
 def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Response:
-    playlists[token].index = index
-    playlists[token].dislike(was_skip)
-    return jsonify(queue=playlists[token].get_queue(request_length))
+    parser = reqparse.RequestParser()
+    parser.add_argument('token', type=str, required=True)
+    parser.add_argument('index', type=int, required=True)
+    parser.add_argument('request_length', type=int, required=True)
+    parser.add_argument('was_skip', type=bool, required=True)
+    args = parser.parse_args()
 
+    try:
+        token: str = args['token']
+        index: int = args['index']
+        request_length: int = args['request_length']
+        was_skip: bool = args['was_skip']
+
+        playlists[token].index = index
+        playlists[token].dislike(was_skip)
+        return jsonify(queue=playlists[token].get_queue(request_length))
+    except Exception as e:
+        message = 'Unknown error: ' + repr(e)
+        print(message)
+        return {'message': message}, 400
 if __name__ == '__main__':
     app.run(host='0.0.0.0')

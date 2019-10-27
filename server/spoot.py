@@ -1,8 +1,9 @@
 import spotify.sync as spotify
 import os
 from typing import List, Tuple, Dict
+import asyncio
 
-client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
+client = spotify.HTTPClient(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
 
 # https://spotifypy.readthedocs.io/en/latest/api.html
 
