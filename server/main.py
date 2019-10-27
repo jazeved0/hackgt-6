@@ -5,7 +5,7 @@ import spotify.sync as spotify
 import random
 import requests
 from collections import namedtuple
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, Optional
 from math import ceil
 import numpy
 
@@ -23,16 +23,33 @@ https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-f
 Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
 class MoodPlaylist:
-    def __init__(self, mood: Mood, track_ids: List[str], index: int, end: int):
+    def __init__(self, auth: str, mood: Mood, play_saved_tracks: bool, track_ids: Optional[List[str]], index: Optional[int], end: Optional[int]):
         """
-        mood is the current mood according to which we'll sort the songs. track_ids is a list of all track_ids, both played and unplayed. `index` is the index within `track_ids` of the currently playing song. `end` is 1 greater than the index of the last song within `track_ids` that we want to play; the last song that meets a certain threshold of closeness to the desired mood.
+        `auth` is the user token
+        `mood` is the current mood according to which we'll sort the songs.
+        `play_saved_tracks` is True if we are playing from the user's saved tracks (or liked songs) and False if we are playing from the all of Spotify (more specifically, the most popular tracks at https://spotifycharts.com/regional)
+        `track_ids` is a list of all track_ids, both played and unplayed.
+        `index` is the index within `track_ids` of the currently playing song.
+        `end` is 1 greater than the index of the last song within `track_ids` that we want to play; the last song that meets a certain threshold of closeness to the desired mood.
         """
+        self.auth = auth
         self.mood = mood
-        self.track_ids = track_ids
-        self.index = index
-        self.end = end
+        self.play_saved_tracks = play_saved_tracks
+        if track_ids:
+            self.track_ids = track_ids
+        else:
+            if play_saved_tracks:
+                track_ids = _fetch_saved_tracks(auth)
+            else:
+                track_ids = _fetch_popular(auth)
+            self.sort(mood)
+        self.index = index if index else 0
+        self.end = end if end else len(self.track_ids)
     
     def get_queue(self) -> List[str]:
+        """
+        Return song IDs of songs that will be played up next.
+        """
         return self.track_ids[self.index + 1 : self.end]
 
     @staticmethod
@@ -59,8 +76,8 @@ class MoodPlaylist:
     def sort(self, new_mood: Mood) -> None:
         """
         Sort songs based on the set mood, such that the songs closer to that mood are first. `index + 1` is the index of the next song; i.e., the first song of the newly sorted portion of the playlist.
-        """        
-        self.track_ids[self.index + 1:] = self.track_ids[self.index + 1:].sorted(key=self._dist)
+        """
+        self.track_ids.sort(key=lambda track_id: self._dist(song_id_to_mood[track_id], new_mood))
         # TODO
         for i in range(self.index, (self.end - self.index)):
             pass
@@ -90,7 +107,7 @@ class MoodPlaylist:
 
     
 # Map user id to their desired mood and their queue.
-user_to_playlist: Dict[str, MoodPlaylist] = {}
+playlists: Dict[str, MoodPlaylist] = {}
 
 # Map a song id to its Mood.
 song_id_to_mood: Dict[str, Mood] = {}
@@ -111,8 +128,8 @@ def _fetch_saved_tracks(auth: str, country='US') -> List[str]:
     Return the song_ids saved tracks for the given user. If the track is not available in the user's region, it is (theoretically) excluded from the output.
     https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
 
-    :param auth: Authorization ID for the given user.
-    :param country: Two-letter abbreviation for the country the user is currently in. This is used to check that a given song in the playlist is available.
+    `auth`: Authorization ID for the given user.
+    `country`: Two-letter abbreviation for the country the user is currently in. This is used to check that a given song in the playlist is available.
     """
     res: Dict = spotify_client.saved_tracks(limit=50)
     song_items: List[Dict] = res['items']
@@ -126,6 +143,13 @@ def _fetch_saved_tracks(auth: str, country='US') -> List[str]:
             song_ids += [item['track']['id'] for item in song_items if country in item['track']['available markets']]
     return song_ids
 
+# TODO
+def _fetch_popular(auth: str) -> List[str]:
+    """
+    Return the track IDs of the 200 most popular songs worldwide.
+    """
+    pass
+
 def _get_song_mood(song_id: str, auth: str) -> Mood:
     """
     Return the song features for the given song ID, as a named tuple Mood. This gets it from the cache if available, or else gets it from Spotify, and then adds it to song_id_to_mood.
@@ -138,49 +162,31 @@ def _get_song_mood(song_id: str, auth: str) -> Mood:
         song_id_to_mood[song_id] = mood
         return mood
 
-def set_mood(mood_str: str, index: int, auth: str):
+def new_playlist(play_saved_tracks: bool, mood_str: str, auth: str) -> None:
     """
-    Set the mood and creates a new queue based on that. `index` is the index of the current song.
+    Create a new mood playlist.
+
+    `play_saved_tracks`: whether we want to play from saved tracks (True) or from top charts (False)
+    `mood_str`: a string representing the mood of the new playlist, such as 'sad bops' or 'adele'
+    `auth`: user token
     """
-    new_mood: Mood = mood_names[mood_str]
-    mood_playlist = user_to_playlist[auth]
-    mood_playlist.index = index
-    mood_playlist.set_mood(new_mood)
+    mood: Mood = mood_names[mood_str]
+    if not playlists[auth] or playlists[auth].play_saved_tracks != play_saved_tracks:
+        playlists[auth] = MoodPlaylist(auth, mood, play_saved_tracks)
+    else:
+        playlists[auth].set_mood(mood)
 
 def get_next_songs(index: int, auth: str, num=10) -> List[Dict]:
     """
     Return the next `num` songs to play. `index` is the index of the current song.
     """
-    queue = user_to_playlist[auth].get_queue()[:num]
+    queue = playlists[auth].get_queue()[:num]
 
 def like(auth: str, index: int):
-    user_to_playlist[auth].like(index)
+    playlists[auth].like(index)
 
 def dislike(auth: str, index: int):
-    user_to_playlist[auth].dislike(index)
-
-def _get_playlist(playlist_id: str, auth: str) -> List[str]:
-    """
-    Given a playlist id, return a list of its song IDs.
-    """
-    pass
-
-def _get_lyrics_sentiment(song_id: str, auth: str) -> float:
-    """
-    Return the sentiment of the song corresponding to the given ID, using sentiment analysis on the lyrics, which are from the Genius API.
-    """
-    pass
-
-# TODO
-def export_playlist(auth: str):
-    """
-    Create a Spotify playlist from what the user has played.
-    """
-    user = spotify_client.user_from_token(auth)
-    playlist = user.create_playlist('feels', description='sample')
-    for track_id in user_to_playlist[auth]['playlist']:
-        track_obj = spotify_client.get_track(track_id)
-        user.add_tracks(playlist, track_obj)
+    playlists[auth].dislike(index)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
