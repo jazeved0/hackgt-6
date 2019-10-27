@@ -176,18 +176,20 @@ def _nearest_moods(token: str) -> Dict[str, float]:
         'hide the tears': 0.6
     }
     """
-    # Mapping from mood name to its distance from the current mood.
-    mood_dists: Dict[str, float] = {}
-    for mood_name, mood_vec in mood_names:
-        mood_dists[mood_name] = euclidean(mood_vec, playlists[token].mood)
-    sorted_mood_dists: List[Tuple[str, float]] = mood_dists.items().sort(key=lambda item: item[0])
-    sum_of_dists = math.sqrt(mood_dists[sorted_mood_dists[0][1]]) + math.sqrt(mood_dists[sorted_mood_dists[1][1]])
-    proportions = (math.sqrt(mood_dists[sorted_mood_dists[0][1]])/sum_of_dists,  math.sqrt(mood_dists[sorted_mood_dists[1][1]])/sum_of_dists)
-    return {
-        sorted_mood_dists[0][0]: proportions[0],
-        sorted_mood_dists[1][0]: proportions[1]
-    }
-
+    try:
+        # Mapping from mood name to its distance from the current mood.
+        mood_dists: Dict[str, float] = {}
+        for mood_name, mood_vec in mood_names:
+            mood_dists[mood_name] = euclidean(mood_vec, playlists[token].mood)
+        sorted_mood_dists: List[Tuple[str, float]] = mood_dists.items().sort(key=lambda item: item[0])
+        sum_of_dists = math.sqrt(mood_dists[sorted_mood_dists[0][1]]) + math.sqrt(mood_dists[sorted_mood_dists[1][1]])
+        proportions = (math.sqrt(mood_dists[sorted_mood_dists[0][1]])/sum_of_dists,  math.sqrt(mood_dists[sorted_mood_dists[1][1]])/sum_of_dists)
+        return {
+            sorted_mood_dists[0][0]: proportions[0],
+            sorted_mood_dists[1][0]: proportions[1]
+        }
+    except Exception as e:
+        print(repr(e))
 
 @app.route('/playlist/new', methods=['GET'])
 def new_playlist() -> Response:
@@ -217,16 +219,16 @@ def new_playlist() -> Response:
             playlists[token] = MoodPlaylist(token, mood, play_saved_tracks)
         else:
             playlists[token].new_mood(mood)
-        return jsonify(queue=playlists[token].get_queue(request_length))
+        return jsonify(queue=playlists[token].get_queue(request_length), colors=_nearest_moods(token))
     except ValueError as e:
         message = 'Incorrect parameter types'
         print(message + ' ' + repr(e))
-        raise e
+        # raise e
         return {'message': message}, 405
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
-        raise e
+        # raise e
         return {'message': message}, 400
 
 @app.route('/playlist/extend', methods=['GET'])
@@ -246,11 +248,11 @@ def get_next_songs() -> Response:
         request_length: int = args['request_length']
 
         playlists[token].index = index
-        return jsonify(queue=playlists[token].get_queue(request_length))
+        return jsonify(queue=playlists[token].get_queue(request_length), colors=_nearest_moods(token))
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
-        raise e
+        # raise e
         return {'message': message}, 400
 
 @app.route('/playlist/like', methods=['POST'])
@@ -271,11 +273,11 @@ def like() -> Response:
 
         playlists[token].index = index
         playlists[token].like()
-        return jsonify(queue=playlists[token].get_queue(request_length, True))
+        return jsonify(queue=playlists[token].get_queue(request_length, True), colors=_nearest_moods(token))
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
-        raise e
+        # raise e
         return {'message': message}, 400
 
 @app.route('/playlist/dislike', methods=['POST'])
@@ -295,7 +297,7 @@ def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Resp
 
         playlists[token].index = index
         playlists[token].dislike(was_skip)
-        return jsonify(queue=playlists[token].get_queue(request_length, True))
+        return jsonify(queue=playlists[token].get_queue(request_length, True), colors=_nearest_moods(token))
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
