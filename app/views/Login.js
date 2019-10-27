@@ -8,8 +8,17 @@ import {
   View
 } from "react-native";
 import Spotify from "rn-spotify-sdk";
+import { FontAwesomeIcon } from "@fortawesome/react-native-fontawesome";
+import { faSpotify } from "@fortawesome/free-brands-svg-icons";
 
-import { backgroundContainer } from "../styles/block";
+import { StackActions, NavigationActions } from "react-navigation";
+import { BackgroundContainer } from "../styles/block";
+import GradientButton from "../components/GradientButton";
+
+const resetAction = StackActions.reset({
+  index: 0,
+  actions: [NavigationActions.navigate({ routeName: "Mood" })]
+});
 
 export default class Login extends PureComponent {
   constructor(props) {
@@ -24,7 +33,7 @@ export default class Login extends PureComponent {
   }
 
   goToPlayer() {
-    this.props.navigation.navigate("mood");
+    this.props.navigation.dispatch(resetAction);
   }
 
   async initializeIfNeeded() {
@@ -39,7 +48,9 @@ export default class Login extends PureComponent {
           "user-read-private",
           "playlist-read",
           "playlist-read-private",
-          "streaming"
+          "streaming",
+          "user-library-read",
+          "app-remote-control"
         ]
       };
       const loggedIn = await Spotify.initialize(spotifyOptions);
@@ -82,7 +93,6 @@ export default class Login extends PureComponent {
       })
       .catch(error => {
         // error
-        console.log(error.message)
         Alert.alert("Error", error.message);
       });
   }
@@ -90,24 +100,48 @@ export default class Login extends PureComponent {
   render() {
     if (!this.state.spotifyInitialized) {
       return (
-        <View style={{ ...styles.container, ...backgroundContainer }}>
+        <View style={{ ...styles.container, ...BackgroundContainer }}>
           <ActivityIndicator
             animating={true}
             style={styles.loadIndicator}
+            size={80}
+            color="#11998e"
           ></ActivityIndicator>
           <Text style={styles.loadMessage}>Loading...</Text>
         </View>
       );
     } else {
       return (
-        <View style={{ ...styles.container, ...backgroundContainer }}>
-          <Text style={styles.greeting}>Please log in to Spotify to continue</Text>
-          <TouchableHighlight
-            onPress={this.spotifyLoginButtonWasPressed}
-            style={styles.spotifyLoginButton}
+        <View style={{ ...styles.container, ...BackgroundContainer }}>
+          <Text style={styles.greeting}>
+            Please log in to Spotify to continue
+          </Text>
+
+          <GradientButton
+            onPressAction={this.spotifyLoginButtonWasPressed}
+            color={["#11998e", "#47D57C"]}
           >
-            <Text style={styles.spotifyLoginButtonText}>Log into Spotify</Text>
-          </TouchableHighlight>
+            <View style={{ flexDirection: "row", paddingHorizontal: 24 }}>
+              <FontAwesomeIcon
+                icon={faSpotify}
+                style={{
+                  color: "white",
+                  marginTop: 2
+                }}
+                size={28}
+              />
+              <Text
+                style={{
+                  marginLeft: 16,
+                  color: "white",
+                  fontSize: 22,
+                  fontWeight: "bold"
+                }}
+              >
+                Log in to Spotify
+              </Text>
+            </View>
+          </GradientButton>
         </View>
       );
     }
@@ -119,36 +153,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F5FCFF"
+    paddingHorizontal: 32
   },
 
   loadIndicator: {
-    //
+    color: "#1DB954"
   },
   loadMessage: {
-    fontSize: 20,
+    fontSize: 24,
     textAlign: "center",
-    margin: 10
-  },
-
-  spotifyLoginButton: {
-    justifyContent: "center",
-    borderRadius: 18,
-    backgroundColor: "green",
-    overflow: "hidden",
-    width: 200,
-    height: 40,
-    margin: 20
-  },
-  spotifyLoginButtonText: {
-    fontSize: 20,
-    textAlign: "center",
-    color: "white"
+    margin: 10,
+    color: "#ddd"
   },
 
   greeting: {
-    fontSize: 20,
+    fontSize: 24,
     textAlign: "center",
-    margin: 10
+    margin: 10,
+    marginBottom: 32,
+    color: "#ddd"
   }
 });

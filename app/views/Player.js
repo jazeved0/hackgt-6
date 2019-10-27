@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef } from "react";
+import React, { useCallback, useState, useRef, useEffect } from "react";
 
 import GradientButton from "../components/GradientButton";
 import {
@@ -7,87 +7,269 @@ import {
   Image,
   View,
   Text,
-  TouchableOpacity
+  Alert,
+  TouchableOpacity,
+  Dimensions
 } from "react-native";
 import Slider from "react-native-slider";
+import RadialGradient from "react-native-radial-gradient";
 import { FontAwesomeIcon } from "@fortawesome/react-native-fontawesome";
 import {
   faStepBackward,
   faStepForward,
   faUndoAlt,
   faPlayCircle,
-  faPauseCircle
+  faPauseCircle,
+  faThumbsUp,
+  faThumbsDown,
+  faSignOutAlt
 } from "@fortawesome/free-solid-svg-icons";
+import axios from "axios";
 import Swiper from "react-native-swiper";
 
+import { StackActions, NavigationActions } from "react-navigation";
 import { BackgroundContainer } from "../styles/block";
 import moods from "../data/moods";
-import { gradients } from "../data/colors";
+import Spotify from "rn-spotify-sdk/src/Spotify";
 
 const basePadding = 20;
 const baseVPadding = 24;
-const baseHPadding = 20;
+const baseHPadding = 24;
 
-const placeholder = i => {
-  return i % 2 === 0
+const minimumLeft = 4;
+const initialRequestLength = 10;
+const refineRequestLength = 10;
+
+const songCache = {};
+const requestingSet = new Set();
+function accessCache(id) {
+  return songCache[id];
+}
+const likedSongSet = new Set();
+let session = null;
+const url = "http://10.0.2.2:5000";
+
+const resetAction = StackActions.reset({
+  index: 0,
+  actions: [NavigationActions.navigate({ routeName: "Login" })]
+});
+
+function formatDuration(duration) {
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  return `${minutes}:${("0" + seconds).substr(-2)}`;
+}
+
+function loadSong(songId) {
+  return Spotify.getTrack(songId);
+}
+
+function blendColors(colorA, colorB, amount) {
+  const [rA, gA, bA] = colorA.match(/\w\w/g).map(c => parseInt(c, 16));
+  const [rB, gB, bB] = colorB.match(/\w\w/g).map(c => parseInt(c, 16));
+  const r = Math.round(rA + (rB - rA) * amount)
+    .toString(16)
+    .padStart(2, "0");
+  const g = Math.round(gA + (gB - gA) * amount)
+    .toString(16)
+    .padStart(2, "0");
+  const b = Math.round(bA + (bB - bA) * amount)
+    .toString(16)
+    .padStart(2, "0");
+  return "#" + r + g + b;
+}
+
+function loadSongMetadata(song) {
+  return song
     ? {
-        image:
-          "https://upload.wikimedia.org/wikipedia/en/d/dd/Lady_Gaga_%E2%80%93_The_Fame_album_cover.png",
-        title: "Just Dance",
-        artist: "Lady Gaga"
+        title: song.name,
+        artist: song.artists[0].name,
+        image: song.album.images[0].url,
+        duration: Math.round(song.duration_ms / 1000)
       }
-    : {
-        image:
-          "https://images.genius.com/c9284e25d68511b33a3376e6eafc1587.1000x1000x1.jpg",
-        title: "Bad Ideas",
-        artist: "Tessa Violet"
-      };
-};
+    : {};
+}
 
 export default function Player({ navigation }) {
   const onReturn = useCallback(() => {
+    Spotify.setPlaying(false);
     navigation.navigate("Mood");
   });
+
   // Navigation state parameters
   const { mood, source } = navigation.state.params;
   const moodObject = moods.find(m => m.key === mood) || {};
-  const currentGradient =
-    typeof moodObject.color === "string"
-      ? gradients[moodObject.color]
-      : moodObject.color;
-  const currentColor = currentGradient[0];
+  const currentColor = moodObject.accent;
+
+  // Fetch queue from API upon mount
+  useEffect(() => {
+    Spotify.getSessionAsync()
+      .then(s => {
+        session = s;
+        newUrl = `${url}/playlist/new?token=${
+          session.accessToken
+        }&request_length=${initialRequestLength}&mood=${mood}&play_saved_tracks=${source !==
+          "spotify"}`;
+        return axios.get(newUrl);
+      })
+      .then(({ data }) => {
+        setQueue(data.queue);
+        setLoaded([...new Array(data.queue.length)].map(_ => false));
+      })
+      .catch(error => {
+        Alert.alert("Error", error.message);
+      });
+  }, []);
 
   // Album slider
   const albumSliderRef = useRef({});
   const [position, setPosition] = useState(0);
+  const onAlbumChange = p => {
+    setPosition(p);
+    playFromStart(queue[p]);
+  };
 
   // Song queue properties
-  const loading = false;
-  const paused = true;
-  const songCount = 5;
-  const queue = [...new Array(songCount)].map((_, i) => placeholder(i));
-  const getSong = i => queue[i];
-  // TODO replace with playback property
-  const song = loading ? { title: "", artist: "" } : getSong(position);
+  const [queue, setQueue] = useState([]);
+  const [loaded, setLoaded] = useState([]);
+  const [paused, setPaused] = useState(true);
+  const loading = loaded.length === 0 || !loaded[position];
+  const songCount = queue.length;
+  const getSong = i => {
+    if (loaded[i]) {
+      return accessCache(queue[i]);
+    } else {
+      const id = queue[i];
+      if (queue[i] && !requestingSet.has(id)) {
+        requestingSet.add(id);
+        loadSong(id)
+          .then(song => {
+            const metadata = loadSongMetadata(song);
+            songCache[id] = metadata;
+            setLoaded(l => l.map((p, j) => p || i === j));
+            requestingSet.delete(id);
+            if (i === position) {
+              playFromStart(id);
+            }
+          })
+          .catch(error => {
+            console.log(error);
+          });
+      }
+      return null;
+    }
+  };
+
+  const song = loading ? { title: " ", artist: " " } : getSong(position);
+  const [trackPosition, setTrackPosition] = useState(0);
+  const trackDuration = loading ? 0 : accessCache(queue[position]).duration;
+
+  const playFromStart = id => playFrom(id, 0);
+  const playFrom = (id, from) => {
+    Spotify.playURI(`spotify:track:${id}`, 0, from)
+      .then(() => {
+        setTrackPosition(from);
+      })
+      .catch(error => {
+        console.log(error);
+      });
+  };
 
   // Playback controls callbacks
-  const onNextPress = () => {
+  const nextSong = () => {
     albumSliderRef.current.next();
+    playFromStart(queue[position + 1]);
+    const newPosition = position + 1;
+    if (minimumLeft <= queue.length - 1 - newPosition) {
+      // TODO Request more songs
+    }
   };
   const onPrevPress = () => {
     albumSliderRef.current.prev();
+    playFromStart(queue[position - 1]);
   };
-  const onPlayPausePress = () => null;
+  const onPlayPausePress = () => {
+    Spotify.setPlaying(paused);
+    setPaused(!paused);
+  };
+
+  // Log out command
+  const onLogOut = () => {
+    Spotify.logout().finally(() => navigation.dispatch(resetAction));
+  };
+
+  // Auto play effect
+  useEffect(() => {
+    let additionalTimer = null;
+    const timer = setInterval(() => {
+      Spotify.getPlaybackStateAsync().then(pbs => {
+        if (!pbs) return;
+        if (!isDraggingRef.current.d) {
+          setTrackPosition(clamp(pbs.position, 0, trackDuration));
+        }
+        setPaused(!pbs.playing);
+        if (trackDuration - pbs.position <= 2) {
+          if (additionalTimer === null) {
+            additionalTimer = setTimeout(() => {
+              albumSliderRef.current.next();
+              playFromStart(queue[position + 1]);
+              additionalTimer = null;
+            }, (trackDuration - pbs.position) * 1000);
+          }
+        }
+      });
+    }, 500);
+    return () => {
+      clearInterval(timer);
+      if (additionalTimer) clearTimeout(additionalTimer);
+    };
+  }, [trackDuration]);
+
+  // Track slider callbacks
+  const isDraggingRef = useRef({ d: false });
+  const newPos = useRef({ p: 0 });
+  const onTrackPositionChange = position => {
+    newPos.current.p = position;
+  };
+  const onTrackSlidingStart = () => {
+    isDraggingRef.current.d = true;
+  };
+  const onTrackSlidingEnd = () => {
+    const { p } = newPos.current;
+    isDraggingRef.current.d = false;
+    setTrackPosition(p);
+    Spotify.seek(p);
+  };
+
+  // On like/dislike
+  const onLike = () => {
+    const id = queue[position];
+    if (!likedSongSet.has(id)) {
+      likedSongSet.add(id);
+      // TODO implement API
+    }
+  };
+  const onDislike = () => {
+    // TODO implement API
+    albumSliderRef.current.next();
+    playFromStart(position + 1);
+  };
 
   // Top level container
   return (
-    <View style={styles.topLevelContainer}>
+    <RadialGradient
+      style={{ ...styles.topLevelContainer }}
+      colors={[blendColors(currentColor, "#222222", 0.8), "#222"]}
+      stops={[0.2, 1]}
+      center={[Dimensions.get("window").width / 2, 0]}
+      radius={300}
+    >
       {/* Return button area */}
       <View style={styles.topContainer}>
         <GradientButton
           textStyle={styles.returnButtonText}
           onPressAction={onReturn}
-          color={moodObject.color}
+          color={[currentColor, currentColor]}
           radius={100}
           height={48}
         >
@@ -99,7 +281,7 @@ export default function Player({ navigation }) {
             />
             <Text
               style={{
-                marginLeft: 8,
+                marginLeft: 12,
                 color: "white",
                 fontSize: 20,
                 fontWeight: "bold"
@@ -109,6 +291,7 @@ export default function Player({ navigation }) {
             </Text>
           </View>
         </GradientButton>
+        <PlaybackButton onPress={onLogOut} size={32} icon={faSignOutAlt} />
       </View>
       {/* Middle album slider */}
       <View style={styles.albumOuter}>
@@ -125,25 +308,41 @@ export default function Player({ navigation }) {
             songCount={songCount}
             loadRange={2}
             ref={albumSliderRef}
-            onChangePosition={setPosition}
+            onChangePosition={onAlbumChange}
             loading={loading}
           />
         </View>
-      </View>
-      {/* Slider Bar*/}
-      <View style={styles.sliderBar}>
-        <Slider
-        step={1}
-        />
       </View>
       {/* Bottom playback controls */}
       <View style={styles.playbackContainer}>
         <SongInfo title={song.title} artist={song.artist} />
       </View>
+      {/* Slider Bar*/}
+      <View style={styles.sliderBar}>
+        <Text style={{ ...styles.playbackText, marginRight: 8 }}>
+          {loading ? "X:XX" : formatDuration(Math.round(trackPosition))}
+        </Text>
+        <Slider
+          value={trackPosition}
+          onValueChange={onTrackPositionChange}
+          onSlidingStart={onTrackSlidingStart}
+          onSlidingComplete={onTrackSlidingEnd}
+          maximumValue={trackDuration}
+          minimumValue={0}
+          minimumTrackTintColor={currentColor}
+          maximumTrackTintColor="#333"
+          thumbTintColor="#ddd"
+          animateTransitions
+          style={{ flex: 1 }}
+        />
+        <Text style={{ ...styles.playbackText, marginLeft: 8 }}>
+          {loading ? "X:XX" : formatDuration(Math.round(trackDuration))}
+        </Text>
+      </View>
       <View style={styles.buttons}>
         <PlaybackButton
           onPress={onPrevPress}
-          disabled={position === 0}
+          disabled={position === 0 || loading}
           size={32}
           icon={faStepBackward}
         />
@@ -151,19 +350,73 @@ export default function Player({ navigation }) {
           onPress={onPlayPausePress}
           size={64}
           icon={paused ? faPlayCircle : faPauseCircle}
-          disabled={songCount === 0}
+          disabled={songCount === 0 || loading}
         />
         <PlaybackButton
-          onPress={onNextPress}
-          disabled={position >= songCount - 1}
+          onPress={nextSong}
+          disabled={position >= songCount - 1 || loading}
           size={32}
           icon={faStepForward}
         />
       </View>
+      <View style={styles.likeDislikeButtons}>
+        <GradientButton
+          textStyle={styles.likeDislikeButtonText}
+          style={styles.likeDislikeButton}
+          onPressAction={onLike}
+          color={[currentColor, currentColor]}
+          radius={100}
+          height={48}
+        >
+          <View style={{ flexDirection: "row" }}>
+            <FontAwesomeIcon
+              icon={faThumbsUp}
+              style={styles.iconBase}
+              size={20}
+            />
+            <Text
+              style={{
+                marginLeft: 12,
+                color: "white",
+                fontSize: 20,
+                fontWeight: "bold"
+              }}
+            >
+              Like
+            </Text>
+          </View>
+        </GradientButton>
+        <GradientButton
+          textStyle={styles.likeDislikeButtonText}
+          style={styles.likeDislikeButton}
+          onPressAction={onDislike}
+          color={[currentColor, currentColor]}
+          radius={100}
+          height={48}
+        >
+          <View style={{ flexDirection: "row" }}>
+            <FontAwesomeIcon
+              icon={faThumbsDown}
+              style={styles.iconBase}
+              size={20}
+            />
+            <Text
+              style={{
+                marginLeft: 12,
+                color: "white",
+                fontSize: 20,
+                fontWeight: "bold"
+              }}
+            >
+              Dislike
+            </Text>
+          </View>
+        </GradientButton>
+      </View>
       <View
         style={{ flex: 1, alignItems: "stretch", justifyContent: "center" }}
       ></View>
-    </View>
+    </RadialGradient>
   );
 }
 
@@ -198,14 +451,19 @@ const styles = StyleSheet.create({
     marginHorizontal: -baseHPadding,
     marginVertical: -baseVPadding
   },
+  playbackText: {
+    fontSize: 14,
+    color: "#999",
+    flex: 0,
+    marginTop: -2
+  },
   sliderBar: {
-    display: 'flex',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 10,
-    marginTop: 10,
-    paddingHorizontal: 48
-
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginHorizontal: basePadding,
+    marginTop: 10
   },
   iconBase: {
     color: "white",
@@ -214,10 +472,21 @@ const styles = StyleSheet.create({
   topContainer: {
     paddingHorizontal: basePadding - 10,
     flexDirection: "row",
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
     alignItems: "stretch",
-    paddingTop: 28,
+    paddingTop: 22,
+    paddingBottom: 0
+  },
+  likeDislikeButtons: {
+    paddingHorizontal: basePadding - 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "stretch",
+    paddingTop: 8,
     paddingBottom: 4
+  },
+  likeDislikeButton: {
+    flex: 1
   },
   playbackContainer: {
     paddingHorizontal: basePadding
@@ -227,8 +496,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    paddingTop: 28,
-    paddingBottom: 4
+    paddingTop: 0,
+    paddingBottom: 18
   },
   returnButtonText: {
     paddingHorizontal: 48
@@ -291,8 +560,12 @@ const songInfoStyles = StyleSheet.create({
 function SongInfo({ title, artist }) {
   return (
     <View style={songInfoStyles.base}>
-      <Text style={songInfoStyles.title}>{title}</Text>
-      <Text style={songInfoStyles.artist}>{artist}</Text>
+      <Text style={songInfoStyles.title} numberOfLines={1}>
+        {title}
+      </Text>
+      <Text style={songInfoStyles.artist} numberOfLines={1}>
+        {artist}
+      </Text>
     </View>
   );
 }
@@ -344,11 +617,11 @@ class AlbumSlider extends React.Component {
   }
 
   prev() {
-    this.swiperRef.current.scrollBy(-1, true);
+    this.swiperRef.current && this.swiperRef.current.scrollBy(-1, true);
   }
 
   next() {
-    this.swiperRef.current.scrollBy(1, true);
+    this.swiperRef.current && this.swiperRef.current.scrollBy(1, true);
   }
 
   setPositionAndUpdate(newPosition) {
@@ -369,14 +642,14 @@ class AlbumSlider extends React.Component {
     const resolveSong = i => {
       if (i >= position - loadRange && i <= position + loadRange) {
         const song = getSong(i);
-        return (
+        return song ? (
           <View style={albumSliderStyles.slide} key={i}>
             <Image
               style={albumSliderStyles.albumArt}
               source={{ uri: song.image }}
             />
           </View>
-        );
+        ) : null;
       } else return null;
     };
     const children = [...Array(songCount).keys()].map(resolveSong);
