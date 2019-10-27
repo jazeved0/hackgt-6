@@ -40,20 +40,22 @@ class MoodPlaylist:
             if play_saved_tracks:
                 self.track_ids = fetch_saved_tracks(token)
             else:
-                self.track_ids = user_top_trackss(token)
+                self.track_ids = top_global()
             self._sort(True)
         self.end = end if end is not None else len(self.track_ids)
     
-    def get_queue(self, length: int = None) -> List[str]:
+    def get_queue(self, length: int = None, after_next: bool = False) -> List[str]:
         """
         Return song IDs of songs that will be played up next.
 
         `length`: number of song IDs to return.
+        `after_next`: False if the queue includes the next song, True if it does not include the song.
         """
+        offset = 1 if after_next else 0
         if length:
-            return self.track_ids[self.index + 1 : self.end][:length]
+            return self.track_ids[self.index + 1 + offset : self.end][:length]
         else:
-            return self.track_ids[self.index + 1 : self.end]
+            return self.track_ids[self.index + 1 + offset : self.end]
 
     def _sort(self, new: bool, threshold=0.4) -> None:
         """
@@ -174,20 +176,17 @@ def _nearest_moods(token: str) -> Dict[str, float]:
         'hide the tears': 0.6
     }
     """
-    # Reverse mapping from mood name to its distance from the current mood.
-    mood_dists: Dict[float, str] = {}
+    # Mapping from mood name to its distance from the current mood.
+    mood_dists: Dict[str, float] = {}
     for mood_name, mood_vec in mood_names:
-        dist = euclidean(mood_vec, playlists[token].mood)
-        mood_dists[dist] = mood_name
-    dists_sorted = mood_dists.keys.sorted()
-    i = 0
-    for mood_name in mood_names:
-        pass # TODO
-    sum_of_dists = math.sqrt(mood_dists[dists_sorted[0]]) + math.sqrt(mood_dists[dists_sorted[1]])
-    proportions = (math.sqrt(mood_dists[dists_sorted[0]])/sum_of_dists,  math.sqrt(mood_dists[dists_sorted[1]])/sum_of_dists)
-
-    return top_two_mood_names
-    # TODO: Project the current mood onto the line connecting the two nearest moods. Return what percent of one mood it is compared to another.
+        mood_dists[mood_name] = euclidean(mood_vec, playlists[token].mood)
+    sorted_mood_dists: List[Tuple[str, float]] = mood_dists.items().sort(key=lambda item: item[0])
+    sum_of_dists = math.sqrt(mood_dists[sorted_mood_dists[0][1]]) + math.sqrt(mood_dists[sorted_mood_dists[1][1]])
+    proportions = (math.sqrt(mood_dists[sorted_mood_dists[0][1]])/sum_of_dists,  math.sqrt(mood_dists[sorted_mood_dists[1][1]])/sum_of_dists)
+    return {
+        sorted_mood_dists[0][0]: proportions[0],
+        sorted_mood_dists[1][0]: proportions[1]
+    }
 
 
 @app.route('/playlist/new', methods=['GET'])
@@ -257,7 +256,7 @@ def get_next_songs() -> Response:
 @app.route('/playlist/like', methods=['POST'])
 def like() -> Response:
     """
-    Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the subsequent songs. 
+    Mark the song with the given index as liked for the given user. This adjusts the mood of the playlist, which affects the order of the songs after the next song. The next song will stay the same because that's already preloaded into the frontend. 
     """
     parser = reqparse.RequestParser()
     parser.add_argument('token', type=str, required=True)
@@ -272,7 +271,7 @@ def like() -> Response:
 
         playlists[token].index = index
         playlists[token].like()
-        return jsonify(queue=playlists[token].get_queue(request_length))
+        return jsonify(queue=playlists[token].get_queue(request_length, True))
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)
@@ -296,7 +295,7 @@ def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Resp
 
         playlists[token].index = index
         playlists[token].dislike(was_skip)
-        return jsonify(queue=playlists[token].get_queue(request_length))
+        return jsonify(queue=playlists[token].get_queue(request_length, True))
     except Exception as e:
         message = 'Unknown error: ' + repr(e)
         print(message)

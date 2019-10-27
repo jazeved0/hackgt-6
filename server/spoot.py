@@ -20,15 +20,16 @@ def fetch_saved_tracks(token: str) -> List[str]:
     library = spotify.Library(client, client.user_from_token(token))
     saved_tracks = library.get_all_tracks()
     output = [track.id for track in saved_tracks]
-    # print(output)
     return output
 
 def fetch_playlist(playlist_id: str) -> List[str]:
     playlist = client.get_playlist(playlist_id)
     tracks = playlist.get_all_tracks()
     output = [track.id for track in tracks]
-    print(output)
     return output
+
+def top_global() -> List[str]:
+    return fetch_playlist('3WxTnGherpf7t4F0VzchD4')
 
 def user_top_tracks(token: str) -> List[str]:
     """
