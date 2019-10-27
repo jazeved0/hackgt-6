@@ -23,16 +23,17 @@ https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-f
 Mood: Tuple[float, float, float] = namedtuple('Mood', 'valence energy danceability')
 
 class MoodPlaylist:
-    def __init__(self, mood: Mood, track_ids: List[str], index: int):
+    def __init__(self, mood: Mood, track_ids: List[str], index: int, end: int):
         """
-        mood is the current mood according to which we'll sort the songs. track_ids is a list of all track_ids, both played and unplayed. index is the index within `track_ids` of the currently playing song.
+        mood is the current mood according to which we'll sort the songs. track_ids is a list of all track_ids, both played and unplayed. `index` is the index within `track_ids` of the currently playing song. `end` is 1 greater than the index of the last song within `track_ids` that we want to play; the last song that meets a certain threshold of closeness to the desired mood.
         """
         self.mood = mood
         self.track_ids = track_ids
         self.index = index
+        self.end = end
     
     def get_queue(self) -> List[str]:
-        return self.track_ids[self.index + 1:]
+        return self.track_ids[self.index + 1 : self.end]
 
     @staticmethod
     def _dist(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
@@ -59,7 +60,10 @@ class MoodPlaylist:
         """
         Sort songs based on the set mood, such that the songs closer to that mood are first. `index + 1` is the index of the next song; i.e., the first song of the newly sorted portion of the playlist.
         """        
-        self.track_ids[index + 1:] = self.track_ids[index + 1:].sorted(key=self._dist)
+        self.track_ids[self.index + 1:] = self.track_ids[self.index + 1:].sorted(key=self._dist)
+        # TODO
+        for i in range(self.index, (self.end - self.index)):
+            pass
 
     def set_mood(self, new_mood: Mood) -> None:
         """
@@ -101,10 +105,6 @@ mood_names: Dict[str, Mood] = {
     'adele': (0, 1, 0),
     'depressed': (0, 0, 0)
 }
-
-Metadata: Tuple = namedtuple('Metadata', 'artist_name ')
-# Maps song ID to its metadata.
-song_metadata: Dict[str, Metadata] = {}
 
 def _fetch_saved_tracks(auth: str, country='US') -> List[str]:
     """
