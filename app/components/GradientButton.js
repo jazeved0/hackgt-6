@@ -1,7 +1,13 @@
 import React from "react";
-import LibraryGradientButton from "react-native-gradient-buttons";
+import LibraryGradientButton from "./LibraryGradientButton";
 
-export default function GradientButton({ text, onPress, color, ...rest }) {
+export default function GradientButton({
+  text,
+  onPress,
+  color,
+  textStyle,
+  ...rest
+}) {
   let props = {};
   if (typeof color === "string") {
     props = { [color]: true };
@@ -12,7 +18,7 @@ export default function GradientButton({ text, onPress, color, ...rest }) {
     <LibraryGradientButton
       text={text}
       gradientDirection="diagonal"
-      textStyle={{ fontSize: 20 }}
+      textStyle={{ fontSize: 20, ...textStyle }}
       radius={10}
       onPressAction={onPress}
       impact

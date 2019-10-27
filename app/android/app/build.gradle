@@ -145,6 +145,7 @@ android {
 }
 
 dependencies {
+    implementation project(':react-native-svg')
     implementation project(':react-native-events')
     implementation project(':rn-spotify-sdk')
     implementation project(':react-native-screens')

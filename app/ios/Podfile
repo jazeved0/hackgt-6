@@ -36,4 +36,6 @@ target 'HackGT6' do
 
   pod 'RNEventEmitter', :path => '../node_modules/react-native-events'
 
+  pod 'RNSVG', :path => '../node_modules/react-native-svg'
+
 end

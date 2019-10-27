@@ -10,7 +10,7 @@ import moods from "../data/moods";
 export default function Source({ navigation }) {
   const { mood } = navigation.state.params;
   const onPress = source => {
-    navigation.navigate("Player", { source });
+    navigation.navigate("Player", { mood, source });
   };
   const style = {
     marginBottom: 16

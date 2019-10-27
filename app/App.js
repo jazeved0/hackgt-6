@@ -2,6 +2,7 @@ import { Easing, Animated } from "react-native";
 import { createStackNavigator } from "react-navigation-stack";
 import { createAppContainer } from "react-navigation";
 
+import Login from "./views/Login";
 import Mood from "./views/Mood";
 import Source from "./views/Source";
 import Player from "./views/Player";
@@ -34,9 +35,8 @@ const transitionConfig = () => {
 
 const navigator = createStackNavigator(
   {
-    Mood: {
-      screen: Mood
-    },
+    Login,
+    Mood,
     Source,
     Player
   },
