@@ -1,16 +1,15 @@
 from flask import Flask, flash, redirect, render_template, request, session, abort
 import sys
 import os
-import spotify.sync as spotify
 import random
 import requests
 from collections import namedtuple
-from typing import Dict, Tuple, Any, Optional
+from typing import Dict, Tuple, Optional
 from math import ceil
 import numpy as np
+from spoot import *
 
 app = Flask(__name__)
-spotify_client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECRET'))
 
 """
 https://developer.spotify.com/documentation/web-api/reference/tracks/get-audio-features/
@@ -39,9 +38,9 @@ class MoodPlaylist:
             self.track_ids = track_ids
         else:
             if play_saved_tracks:
-                track_ids = _fetch_saved_tracks(auth)
+                track_ids = fetch_saved_tracks(auth)
             else:
-                track_ids = _fetch_popular(auth)
+                track_ids = fetch_popular(auth)
             self._sort(True)
         self.index = index if index else 0
         self.end = end if end else len(self.track_ids)
@@ -56,15 +55,15 @@ class MoodPlaylist:
         """
         Sort songs based on the current mood, such that the songs closer to that mood are first. This is meant to be called after changing the mood.
 
-        `new`: True if it's a brand new playlist and so we should sort the entire playlist, and False if we only want to sort the songs after `index + 1`.
+        `new`: True if it's a brand new playlist and so we should sort the entire playlist, and False if we only want to sort the songs starting with `index + 1`.
         `threshold`: maximum distance between the mood of a song and `self.mood`. `self.end` will be set such that songs that exceed this threshold will not be played.
         """
         comparator = lambda track_id: np.linalg.norm(song_mood[track_id], self.mood)
         if new:
             self.track_ids.sort(key=comparator)
         else:
-            self.track_ids[index:] = self.track_ids.sorted(key=comparator)
-        # TODO: set self.end        
+            self.track_ids[index + 1:] = self.track_ids.sorted(key=comparator)
+        # TODO: set self.end
         # TODO
         for i in range(self.index, (self.end - self.index)):
             pass
@@ -116,31 +115,6 @@ mood_names: Dict[str, Mood] = {
     'adele': (0, 1, 0),
     'depressed': (0, 0, 0)
 }
-
-def _fetch_saved_tracks(auth: str, country='US') -> List[str]:
-    """
-    Return the song_ids saved tracks for the given user. If the track is not available in the user's region, it is (theoretically) excluded from the output.
-    https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
-
-    `auth`: Authorization ID for the given user.
-    `country`: Two-letter abbreviation for the country the user is currently in. This is used to check that a given song in the playlist is available.
-    """
-    total = float('inf')
-    song_ids = []
-    offset = 0
-    while offset < total:
-        res: Dict = spotify_client.saved_tracks(limit=50, offset=offset)
-        song_ids += [item['track']['id'] for item in res['items'] if country in item['track']['available markets']]
-        total: int = res['total'] # this doesn't need to be set every iteration but it's simpler to do it this way
-        offset += 50
-    return song_ids
-
-# TODO
-def _fetch_popular(auth: str) -> List[str]:
-    """
-    Return the track IDs of the 200 most popular songs worldwide.
-    """
-    pass
 
 def _get_song_mood(song_id: str, auth: str) -> Mood:
     """
