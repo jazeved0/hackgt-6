@@ -162,7 +162,13 @@ export default function Player({ navigation }) {
 
   const song = loading ? { title: " ", artist: " " } : getSong(position);
   const [trackPosition, setTrackPosition] = useState(0);
-  const trackDuration = loading ? 0 : accessCache(queue[position]).duration;
+  const trackDuration =
+    !loading &&
+    position <= queue.length &&
+    queue[position] &&
+    accessCache(queue[position])
+      ? accessCache(queue[position]).duration
+      : 0;
 
   const playFromStart = id => playFrom(id, 0);
   const playFrom = (id, from) => {
@@ -181,7 +187,18 @@ export default function Player({ navigation }) {
     playFromStart(queue[position + 1]);
     const newPosition = position + 1;
     if (minimumLeft <= queue.length - 1 - newPosition) {
-      // TODO Request more songs
+      axios
+        .post(
+          `${url}/playlist/dislike?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}&was_skip=true`
+        )
+        .then(({ data }) => {
+          console.log(data);
+          const previousQueue = queue.slice(0, position + 2);
+          const previousLoaded = loaded.slice(0, position + 2);
+          const newLoaded = [...new Array(data.queue.length)].map(_ => false);
+          setQueue([...previousQueue, ...data.queue]);
+          setLoaded([...previousLoaded, ...newLoaded]);
+        });
     }
   };
   const onPrevPress = () => {
@@ -214,6 +231,18 @@ export default function Player({ navigation }) {
               albumSliderRef.current.next();
               playFromStart(queue[position + 1]);
               additionalTimer = null;
+              axios
+                .post(
+                  `${url}/playlist/extend?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}`
+                )
+                .then(({ data }) => {
+                  console.log(data);
+                  const newLoaded = [...new Array(data.queue.length)].map(
+                    _ => false
+                  );
+                  setQueue([...queue, ...data.queue]);
+                  setLoaded([...loaded, ...newLoaded]);
+                });
             }, (trackDuration - pbs.position) * 1000);
           }
         }
@@ -246,13 +275,42 @@ export default function Player({ navigation }) {
     const id = queue[position];
     if (!likedSongSet.has(id)) {
       likedSongSet.add(id);
-      // TODO implement API
+      axios
+        .post(
+          `${url}/playlist/like?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}`
+        )
+        .then(({ data }) => {
+          console.log(data);
+          const previousQueue = queue.slice(0, position + 2);
+          const previousLoaded = loaded.slice(0, position + 2);
+          const newLoaded = [...new Array(data.queue.length)].map(_ => false);
+          setQueue([...previousQueue, ...data.queue]);
+          setLoaded([...previousLoaded, ...newLoaded]);
+        });
     }
   };
   const onDislike = () => {
-    // TODO implement API
     albumSliderRef.current.next();
     playFromStart(position + 1);
+    axios
+      .post(
+        `${url}/playlist/dislike?token=${session.accessToken}&index=${position}&request_length=${refineRequestLength}&was_skip=false`
+      )
+      .then(({ data }) => {
+        console.log("data");
+        console.log(data);
+        console.log("queue");
+        console.log(queue);
+        const previousQueue = queue.slice(0, position + 2);
+        console.log("prevQueue");
+        console.log(previousQueue);
+        console.log("nextQueue");
+        console.log([...previousQueue, ...data.queue]);
+        const previousLoaded = loaded.slice(0, position + 2);
+        const newLoaded = [...new Array(data.queue.length)].map(_ => false);
+        setQueue([...previousQueue, ...data.queue]);
+        setLoaded([...previousLoaded, ...newLoaded]);
+      });
   };
 
   // Top level container

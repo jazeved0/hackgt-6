@@ -70,7 +70,7 @@ class MoodPlaylist:
         if new:
             self.track_ids.sort(key=dist)
         else:
-            self.track_ids[index + 1:] = self.track_ids.sorted(key=dist)
+            self.track_ids[self.index + 1:] = sorted(self.track_ids, key=dist)
         self.end = len(self.track_ids)
         for i, track_id in enumerate(self.track_ids):
             if dist(track_id) > threshold:
@@ -281,7 +281,7 @@ def like() -> Response:
         return {'message': message}, 400
 
 @app.route('/playlist/dislike', methods=['POST'])
-def dislike(token: str, index: int, request_length: int, was_skip: bool) -> Response:
+def dislike() -> Response:
     parser = reqparse.RequestParser()
     parser.add_argument('token', type=str, required=True)
     parser.add_argument('index', type=int, required=True)
