@@ -6,33 +6,20 @@ client = spotify.Client(os.environ.get('CLIENT_ID'), os.environ.get('CLIENT_SECR
 
 # https://spotifypy.readthedocs.io/en/latest/api.html
 
-def fetch_saved_tracks(auth: str, country='US', lim=1000) -> List[str]:
+def fetch_saved_tracks(auth: str) -> List[str]:
     """
-    Return the song_ids saved tracks for the given user. If the track is not available in the user's region, it is (theoretically) excluded from the output.
-    https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
+    Return the song_ids saved tracks for the given user.
 
     `auth`: Authorization ID for the given user.
-    `country`: Two-letter abbreviation for the country the user is currently in. This is used to check that a given song in the playlist is available.
-    `lim`: The maximum number of song IDs to return.
     """
-    total = float('inf')
-    song_ids = []
-    offset = 0
-    while offset < min(total, lim):
-        res: Dict = client.saved_tracks(limit=50, offset=offset)
-        song_ids += [item['track']['id'] for item in res['items'] if country in item['track']['available markets']]
-        total: int = res['total'] # this doesn't need to be set every iteration but it's simpler to do it this way
-        offset += 50
-    return song_ids
+    user = client.user_from_token(auth)
+    saved_tracks = user.top_artists(limit=50)
+    return [artist.id for artist in saved_tracks]
 
-def fetch_playlist(
-
-# TODO
-def fetch_popular(auth: str) -> List[str]:
-    """
-    Return the track IDs of the 200 most popular songs worldwide.
-    """
-    pass
+def fetch_playlist(playlist_id: str) -> List[str]:
+    playlist = client.get_playlist(playlist_id)
+    tracks = playlist.get_all_tracks()
+    return [track.id for track in tracks]
 
 def user_top_tracks(auth: str) -> List[str]:
     """
@@ -48,7 +35,13 @@ def user_top_artists(auth: str) -> List[str]:
     top_artists: List[spotify.Artist] = user.top_artists(limit=50)
     return [artist.id for artist in top_artists]
 
-def artist_top_tracks(artist_id: str) -> List[str]:
+def artist_top_tracks(artist_id: str, limit=10) -> List[str]:
     artist: spotify.Artist = client.get_artist(artist_id)
-    top_tracks: List[spotify.Track] = artist.top_tracks(limit=50)
+    top_tracks: List[spotify.Track] = artist.top_tracks(limit=limit)
     return [track.id for track in top_tracks]
+
+def user_top_trackss(auth: str) -> List[str]:
+    """
+    Return the track IDs of the user's top tracks concatenated with the top 10 tracks for each of the user's top 50 artists.
+    """
+    return user_top_tracks(auth) + [*artist_top_tracks(artist_id) for artist_id in user_top_artists(auth)]

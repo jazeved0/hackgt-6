@@ -7,7 +7,7 @@ from collections import namedtuple
 from typing import Dict, Tuple, Optional
 from math import ceil
 import numpy as np
-from spoot import *
+from .spoot import *
 
 app = Flask(__name__)
 
@@ -40,7 +40,7 @@ class MoodPlaylist:
             if play_saved_tracks:
                 track_ids = fetch_saved_tracks(auth)
             else:
-                track_ids = fetch_popular(auth)
+                track_ids = user_top_trackss(auth)
             self._sort(True)
         self.index = index if index else 0
         self.end = end if end else len(self.track_ids)
@@ -91,11 +91,16 @@ class MoodPlaylist:
         """
         self._like_or_dislike(0.5)
 
-    def dislike(self) -> None:
+    def dislike(self, was_skip=False) -> None:
         """
         Update the mood in the direction opposite to the current song, which has an id equal to `self.track_ids[self.index]`.
+
+        `was_skip`: True if the user skipped and False if it was an actual dislike. Skips have half the weight of a dislike.
         """
-        self._like_or_dislike(-0.5)
+        if was_skip:
+            self._like_or_dislike(-0.25)
+        else:
+            self._like_or_dislike(-0.5)
 
     
 # Map user IDs to their corresponding MoodPlaylist.
@@ -123,7 +128,7 @@ def _get_song_mood(song_id: str, auth: str) -> Mood:
     if song_id in song_mood:
         return song_mood[song_id]
     else:
-        res = spotify_client.track_audio_features(song_id)
+        res = client.track_audio_features(song_id)
         mood = (res['valence'], res['energy'], res['danceability'])
         song_mood[song_id] = mood
         return mood
